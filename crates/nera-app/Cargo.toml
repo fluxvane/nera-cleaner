@@ -1,0 +1,31 @@
+[package]
+name = "nera-app"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "nera-cleaner"
+path = "src/main.rs"
+
+[dependencies]
+nera-core.workspace = true
+nera-ui.workspace = true
+gpui-kit.workspace = true
+anyhow.workspace = true
+log.workspace = true
+nera-settings.workspace = true
+nera-cleanup.workspace = true
+nera-devscan.workspace = true
+nera-duplicates.workspace = true
+nera-space.workspace = true
+nera-apps.workspace = true
+nera-processes.workspace = true
+nera-startup.workspace = true
+nera-performance.workspace = true
+nera-battery.workspace = true
+nera-privacy.workspace = true
+
+# Embeds the icon and version info into the .exe.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nera-core",
+    "crates/nera-ui",
+    "crates/nera-app",
+    "crates/features/cleanup",
+    "crates/features/devscan",
+    "crates/features/duplicates",
+    "crates/features/space",
+    "crates/features/apps",
+    "crates/features/processes",
+    "crates/features/startup",
+    "crates/features/performance",
+    "crates/features/battery",
+    "crates/features/privacy",
+    "crates/features/settings",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/fluxvane/nera-cleaner"
+
+[workspace.dependencies]
+nera-core = { path = "crates/nera-core" }
+nera-ui = { path = "crates/nera-ui" }
+nera-cleanup = { path = "crates/features/cleanup" }
+nera-devscan = { path = "crates/features/devscan" }
+nera-duplicates = { path = "crates/features/duplicates" }
+nera-space = { path = "crates/features/space" }
+nera-apps = { path = "crates/features/apps" }
+nera-processes = { path = "crates/features/processes" }
+nera-startup = { path = "crates/features/startup" }
+nera-performance = { path = "crates/features/performance" }
+nera-battery = { path = "crates/features/battery" }
+nera-privacy = { path = "crates/features/privacy" }
+nera-settings = { path = "crates/features/settings" }
+gpui-kit = "=0.9.1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+# OS / FS helpers available to feature crates (`name.workspace = true`).
+libc = "0.2"
+walkdir = "2"
+rayon = "1"
+blake3 = "1"
+plist = "1"
+sysinfo = "0.37"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+windows-sys = "0.61"
+core-foundation = "0.10"
+io-kit-sys = "0.4"
+mach2 = "0.4"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

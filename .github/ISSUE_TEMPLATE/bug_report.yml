@@ -1,0 +1,55 @@
+name: Bug report
+description: Something is wrong, shows a wrong number, or was removed when it should not have been
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the app removed data it should have protected and the details are sensitive, please use the
+        private report in SECURITY.md instead.
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Screen
+      options:
+        - Dashboard
+        - System Junk
+        - Developer Junk
+        - Duplicates
+        - Space Lens
+        - Applications
+        - Processes
+        - Login Items / Startup Apps
+        - Performance
+        - Battery & Sensors
+        - Privacy
+        - Settings
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: macOS 15.5 (Apple Silicon) / Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Nera Cleaner version or commit
+      placeholder: 0.1.0 / 8f948de
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Steps to reproduce, what you expected, and what you saw. For a wrong number, add what the system tool shows (du, Finder, Activity Monitor, Task Manager).
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or dump output
+      description: "Optional. `cargo run -p nera-<feature> --example dump_<feature>` prints what the screen shows. Remove personal paths first."

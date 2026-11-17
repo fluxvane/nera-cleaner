@@ -1,0 +1,27 @@
+name: Feature request
+description: A new cleanup target, a new number, or a change to how a screen works
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like the app to do
+      description: For a new cleanup target, say which app creates the data and how it gets it back after a cleanup.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Windows
+        - Both
+    validations:
+      required: true

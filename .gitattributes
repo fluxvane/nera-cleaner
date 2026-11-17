@@ -1,0 +1,7 @@
+# One line-ending convention on every platform: the zsh bundle script breaks
+# with CRLF, and rustfmt output should not depend on who checked the file out.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary

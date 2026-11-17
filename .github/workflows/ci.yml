@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The jobs only read the repository and upload build artifacts.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the toolchain pinned in rust-toolchain.toml.
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace --exclude nera-app
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: scripts/bundle.sh --release --zip
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/package.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nera-cleaner-${{ matrix.name }}
+          path: dist/*.zip
+          if-no-files-found: error

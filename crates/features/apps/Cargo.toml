@@ -1,0 +1,32 @@
+[package]
+name = "nera-apps"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nera-core.workspace = true
+nera-ui.workspace = true
+gpui-kit.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+rayon.workspace = true
+chrono.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_Com",
+    "Win32_System_Environment",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

@@ -1,0 +1,3 @@
+[build]
+# Parallel agents share one target dir; keep memory bounded.
+jobs = 4

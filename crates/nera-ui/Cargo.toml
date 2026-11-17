@@ -1,0 +1,9 @@
+[package]
+name = "nera-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nera-core.workspace = true
+gpui-kit.workspace = true
+log.workspace = true

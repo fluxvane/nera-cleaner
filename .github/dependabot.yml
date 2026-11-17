@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    ignore:
+      # Pinned on purpose: the UI code is written against this exact release.
+      - dependency-name: gpui-kit
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
