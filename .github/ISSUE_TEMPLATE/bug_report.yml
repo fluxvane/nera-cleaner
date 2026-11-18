@@ -38,7 +38,7 @@ body:
     id: version
     attributes:
       label: Nera Cleaner version or commit
-      placeholder: 0.1.0 / 8f948de
+      placeholder: 1.0.0
     validations:
       required: true
   - type: textarea
