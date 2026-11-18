@@ -67,8 +67,15 @@ See "Platforms" in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code
 
 ## Getting it
 
-There are no packaged releases yet: build it from source (below). Every push to `main` also produces
-unsigned macOS and Windows zips as CI artifacts.
+Download the zip for your system from the [latest release](https://github.com/fluxvane/nera-cleaner/releases/latest):
+macOS (Apple Silicon) or Windows (x64). On an Intel Mac or Windows on ARM, build it from source (below).
+
+The builds are not signed with a paid developer certificate, so the system asks before the first launch:
+
+- macOS: open the app once, then allow it in **System Settings → Privacy & Security → Open Anyway**.
+- Windows: in the SmartScreen dialog choose **More info → Run anyway**.
+
+`SHA256SUMS.txt` on the release page lists the checksum of each zip.
 
 ## Requirements
 

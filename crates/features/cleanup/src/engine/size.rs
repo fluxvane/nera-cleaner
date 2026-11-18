@@ -333,7 +333,11 @@ mod tests {
 
     fn write(p: &Path, n: usize) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, vec![7u8; n]).unwrap();
+        // Synced, so APFS has allocated the blocks before a test sizes the
+        // file (otherwise it measures 0 now and then).
+        let mut f = std::fs::File::create(p).unwrap();
+        std::io::Write::write_all(&mut f, &vec![7u8; n]).unwrap();
+        f.sync_all().unwrap();
     }
 
     fn size(p: &Path, removal: Removal) -> u64 {

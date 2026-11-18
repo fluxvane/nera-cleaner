@@ -727,14 +727,17 @@ mod windows_tests {
 
 #[cfg(test)]
 mod measured_tests {
-    use super::measured_line;
+    use super::{bytes, measured_line};
 
     #[test]
     fn states_a_gain_only_when_there_is_one() {
+        // Compared through `bytes`: macOS shows decimal units, Windows binary ones.
         let gb = 1_000_000_000u64;
         let line = measured_line(60 * gb, 69 * gb);
         assert!(
-            line.contains("60") && line.contains("69") && line.contains("(+9"),
+            line.contains(&bytes(60 * gb))
+                && line.contains(&bytes(69 * gb))
+                && line.contains(&format!("(+{})", bytes(9 * gb))),
             "{line}"
         );
         // Moved to the Trash, or the disk lost space meanwhile: no gain claimed.
