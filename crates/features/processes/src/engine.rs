@@ -204,7 +204,8 @@ impl Default for Sampler {
 impl Sampler {
     pub fn new() -> Self {
         Self {
-            sys: System::new(),
+            // Only built on macOS, which sysinfo supports; `Err` means an unsupported platform.
+            sys: System::new().expect("sysinfo supports macOS"),
             user_names: HashMap::new(),
             prev: HashMap::new(),
             registry: Registry {
