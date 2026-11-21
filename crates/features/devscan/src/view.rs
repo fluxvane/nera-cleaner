@@ -1,6 +1,7 @@
 //! Pure text for the screen: every string that carries data is built here so
 //! the screen, the `dump` example and the unit tests share one implementation.
 
+use crate::engine::worktree::{Level, Reason, Worktree};
 use crate::engine::{self, JunkFolder, Project, ScanOutcome};
 use nera_core::format;
 use std::time::SystemTime;
@@ -219,6 +220,186 @@ pub fn clean_result(
     }
 }
 
+// MARK: - Worktrees
+
+/// Badge text and tone of a worktree row.
+pub fn worktree_badge(reason: Reason) -> (&'static str, Kind) {
+    match reason {
+        Reason::Merged => ("Merged", Kind::Success),
+        Reason::Missing => ("Folder missing", Kind::Success),
+        Reason::Stale => ("Inactive", Kind::Info),
+        Reason::IgnoredFiles => ("Ignored files", Kind::Info),
+        Reason::VolumeUnavailable => ("Unavailable", Kind::Info),
+        Reason::Unverified => ("Can't verify", Kind::Info),
+        Reason::Dirty => ("Uncommitted changes", Kind::Danger),
+        Reason::Unpushed => ("Unpushed commits", Kind::Danger),
+        Reason::Stashed => ("Has a stash", Kind::Danger),
+        Reason::Locked => ("Locked", Kind::Warning),
+        Reason::InUse => ("In use", Kind::Warning),
+    }
+}
+
+/// One sentence on what the badge means, shown under the row.
+pub fn worktree_explain(reason: Reason) -> &'static str {
+    match reason {
+        Reason::Merged => "Its branch is merged and nothing is left in the folder.",
+        Reason::Missing => "The folder is gone; only git's record of it is removed.",
+        Reason::Stale => "Not touched for a long time, but its branch is not known to be merged.",
+        Reason::IgnoredFiles => {
+            "Merged, but the folder holds ignored files (such as .env) that are not build output."
+        }
+        Reason::VolumeUnavailable => {
+            "The folder is missing and so is the drive or folder around it. It may just be unplugged."
+        }
+        Reason::Unverified => "Git could not confirm that nothing would be lost.",
+        Reason::Dirty => "Has uncommitted changes or untracked files. Kept.",
+        Reason::Unpushed => "Has commits that exist nowhere else. Kept.",
+        Reason::Stashed => "A stash was made on its branch. Kept.",
+        Reason::Locked => "Locked with git worktree lock. Kept.",
+        Reason::InUse => "A program is running from this folder. Kept.",
+    }
+}
+
+/// Where it is, which branch, when it last changed and why it is listed.
+pub fn worktree_subtitle(w: &Worktree, now: SystemTime) -> String {
+    let mut out = engine::display_path(&w.path);
+    if let Some(branch) = &w.branch {
+        out = format!("{out} · {branch}");
+    }
+    if let Some(t) = w.last_activity {
+        out = format!("{out} · last changed {}", engine::age_label(t, now));
+    }
+    format!("{out} · {}", worktree_explain(w.reason))
+}
+
+/// Header of a repository group.
+pub fn worktree_repo_subtitle(repo: &std::path::Path, n: usize, selected: usize) -> String {
+    let mut out = format!("{} · {}", engine::display_path(repo), count(n, "worktree"));
+    if selected > 0 {
+        out = format!("{out}, {selected} selected");
+    }
+    out
+}
+
+/// Can the row be ticked at all?
+pub fn worktree_selectable(w: &Worktree) -> bool {
+    w.reason.level() != Level::Blocked
+}
+
+/// Ticked as soon as the scan finishes: only what loses nothing.
+pub fn worktree_preselected(w: &Worktree) -> bool {
+    w.reason.level() == Level::Safe
+}
+
+pub fn worktree_footer(selected: usize, size: u64) -> String {
+    if selected == 0 {
+        return "No worktrees selected".to_string();
+    }
+    if size == 0 {
+        return format!("{} selected", count(selected, "worktree"));
+    }
+    format!(
+        "{} selected · {}",
+        count(selected, "worktree"),
+        format::bytes(size)
+    )
+}
+
+/// Title and message of the confirmation. `review` is how many ticked rows
+/// are not known to be merged.
+pub fn worktree_confirm(n: usize, size: u64, review: usize, to_trash: bool) -> (String, String) {
+    let noun = count(n, "worktree");
+    let trash = nera_core::os::TRASH;
+    let size_part = if size > 0 {
+        format!(" ({} on disk)", format::bytes(size))
+    } else {
+        String::new()
+    };
+    let verdict = if review == 0 {
+        "Their branches are merged or their folders are already gone, and nothing is uncommitted. "
+            .to_string()
+    } else {
+        let (subject, pronoun) = if review == 1 {
+            ("1 ticked worktree is".to_string(), "it")
+        } else {
+            (format!("{review} ticked worktrees are"), "them")
+        };
+        format!(
+            "{subject} not known to be merged: look at {pronoun} before you continue. Nothing uncommitted or unpushed is included. "
+        )
+    };
+    if to_trash {
+        (
+            format!("Move {noun} to the {trash}?"),
+            format!(
+                "{noun}{size_part} will be moved to the {trash} and removed from git's list. {verdict}Branches are kept. If you restore a folder from the {trash}, run `git worktree repair` inside it to link it again."
+            ),
+        )
+    } else {
+        (
+            format!("Delete {noun} permanently?"),
+            format!(
+                "{noun}{size_part} will be deleted permanently and can't be restored. {verdict}Branches are kept."
+            ),
+        )
+    }
+}
+
+/// Title and message of the toast / banner after removing worktrees.
+pub fn worktree_result(
+    removed: usize,
+    failed: usize,
+    size: u64,
+    to_trash: bool,
+    first_failure: &str,
+) -> (Kind, String, String) {
+    let verb = if to_trash { "Moved" } else { "Removed" };
+    let dest = if to_trash {
+        concat!(" to the ", nera_core::trash_name!())
+    } else {
+        ""
+    };
+    let amount = if size == 0 {
+        "Git's record of them is gone.".to_string()
+    } else if to_trash {
+        format!(
+            "{} moved to the {}. Space is freed when you empty it.",
+            format::bytes(size),
+            nera_core::os::TRASH
+        )
+    } else {
+        format!("Freed {}.", format::bytes(size))
+    };
+    match (removed, failed) {
+        (0, 0) => (
+            Kind::Info,
+            "Nothing was removed".into(),
+            "The cleanup was stopped.".into(),
+        ),
+        (0, failed) => (
+            Kind::Danger,
+            "Nothing was removed".into(),
+            format!(
+                "{} could not be removed. {first_failure}",
+                count(failed, "worktree")
+            ),
+        ),
+        (n, 0) => (
+            Kind::Success,
+            format!("{verb} {}{dest}", count(n, "worktree")),
+            amount,
+        ),
+        (n, failed) => (
+            Kind::Warning,
+            format!("{verb} {}{dest}", count(n, "worktree")),
+            format!(
+                "{amount} {} was left untouched. {first_failure}",
+                count(failed, "worktree")
+            ),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,5 +520,67 @@ mod tests {
         assert_eq!(clean_result(0, 3, 0, 0, false, "x").0, Kind::Danger);
         assert!(shared_note(10_000_000, 10_000_000).is_empty());
         assert!(shared_note(10_000_000, 1_000_000).contains("at least 1.00 MB"));
+    }
+
+    #[test]
+    fn worktree_rows_say_what_is_kept_and_why() {
+        let w = |reason| Worktree {
+            path: PathBuf::from("/x/p/.claude/worktrees/a"),
+            repo: PathBuf::from("/x/p"),
+            branch: Some("feat/a".into()),
+            reason,
+            size: 10,
+            last_activity: Some(SystemTime::UNIX_EPOCH),
+            origin: Some("Claude Code"),
+        };
+        assert!(worktree_selectable(&w(Reason::Merged)));
+        assert!(worktree_preselected(&w(Reason::Merged)));
+        assert!(worktree_preselected(&w(Reason::Missing)));
+        assert!(worktree_selectable(&w(Reason::Stale)));
+        assert!(!worktree_preselected(&w(Reason::Stale)));
+        assert!(!worktree_preselected(&w(Reason::IgnoredFiles)));
+        for blocked in [
+            Reason::Dirty,
+            Reason::Unpushed,
+            Reason::Stashed,
+            Reason::Locked,
+            Reason::InUse,
+        ] {
+            assert!(!worktree_selectable(&w(blocked)), "{blocked:?}");
+            assert!(!worktree_preselected(&w(blocked)));
+            assert!(worktree_explain(blocked).ends_with("Kept."));
+        }
+        let sub = worktree_subtitle(&w(Reason::Dirty), SystemTime::UNIX_EPOCH);
+        assert!(sub.contains("feat/a") && sub.contains("last changed") && sub.contains("Kept."));
+    }
+
+    #[test]
+    fn worktree_confirmation_is_honest_about_what_is_included() {
+        let (title, msg) = worktree_confirm(2, 1_000_000, 0, true);
+        assert!(title.starts_with("Move 2 worktrees to the"));
+        assert!(msg.contains("are merged") && msg.contains("git worktree repair"));
+        let (_, msg) = worktree_confirm(3, 0, 1, false);
+        assert!(
+            msg.contains("1 ticked worktree is not known to be merged"),
+            "{msg}"
+        );
+        assert!(msg.contains("can't be restored") && !msg.contains("on disk"));
+        let (_, msg) = worktree_confirm(3, 0, 2, false);
+        assert!(msg.contains("2 ticked worktrees are not known"), "{msg}");
+    }
+
+    #[test]
+    fn worktree_results_never_say_freed_for_the_trash() {
+        let (kind, title, msg) = worktree_result(2, 0, 5_000_000, true, "");
+        assert_eq!(kind, Kind::Success);
+        assert!(title.starts_with("Moved 2 worktrees to the"));
+        assert!(!msg.contains("Freed"));
+        let (_, _, msg) = worktree_result(1, 0, 5_000_000, false, "");
+        assert!(msg.starts_with("Freed "));
+        let (kind, ..) = worktree_result(0, 2, 0, false, "x");
+        assert_eq!(kind, Kind::Danger);
+        let (kind, _, msg) = worktree_result(1, 1, 0, false, "Left untouched.");
+        assert_eq!(kind, Kind::Warning);
+        assert!(msg.contains("1 worktree was left untouched"), "{msg}");
     }
 }

@@ -21,7 +21,7 @@ fact.
 |---|---|
 | **Dashboard** | Disk use (Finder's "available" figure), junk found, last cleanup, Smart Scan |
 | **System Junk** | Caches, logs and temporary files by category; review before anything is removed. After a cleanup it reports the free space the disk itself shows, before and after. Also shows what a cleaner must not delete but you may want to free: cloud-drive files stored on the Mac (Google Drive, iCloud, OneDrive) and Siri / Apple Intelligence data, each with the supported way to release it |
-| **Developer Junk** | `node_modules`, build folders, Xcode/Gradle/Cargo caches that projects can regenerate |
+| **Developer Junk** | `node_modules`, build folders, Xcode/Gradle/Cargo caches that projects can regenerate, plus git worktrees whose branch is merged, whose folder is gone, or that nobody has used for months |
 | **Duplicates** | Identical files by content hash; clones and hard links are recognised so savings aren't overstated |
 | **Space Lens** | Folder-by-folder disk usage and the largest files |
 | **Applications** | Installed apps, their size and leftovers; uninstall to the Trash |

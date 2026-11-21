@@ -42,6 +42,8 @@ pub use platform::measure;
 pub use platform::private_size;
 use platform::{git_binary, is_hidden, no_window};
 
+pub mod worktree;
+
 // MARK: - Ecosystems
 
 /// Technology stack of a project. Declaration order is detection priority
@@ -754,6 +756,8 @@ pub enum Phase {
     #[default]
     Discovering,
     Measuring,
+    /// Checking the git worktrees of the repositories found.
+    Worktrees,
 }
 
 /// Live progress, written from the scan thread.
@@ -769,7 +773,7 @@ pub struct Progress {
 
 impl Progress {
     pub fn fraction(&self) -> Option<f64> {
-        (self.phase == Phase::Measuring && self.to_measure > 0)
+        (matches!(self.phase, Phase::Measuring | Phase::Worktrees) && self.to_measure > 0)
             .then(|| self.measured as f64 / self.to_measure as f64)
     }
 }
@@ -792,6 +796,10 @@ pub struct ScanOutcome {
     /// True when at least one folder was refused by macOS privacy (EPERM).
     pub privacy_denied: bool,
     pub missing_roots: Vec<PathBuf>,
+    /// Git worktrees that are merged, gone or abandoned, per repository.
+    pub worktrees: Vec<worktree::RepoWorktrees>,
+    /// Repositories have linked worktrees but git could not be run.
+    pub worktrees_git_missing: bool,
     pub cancelled: bool,
     pub elapsed: Duration,
 }
@@ -966,7 +974,24 @@ pub fn scan(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
+    let (out_folders, out_projects) = (out.folders_scanned, projects.len());
     out.projects = projects;
+    if !cancel.is_cancelled() {
+        let roots = normalize_roots(&opts.roots);
+        let repos = worktree::find_repos(&roots, &excluded, cancel);
+        let found = worktree::scan(&repos, &roots, &excluded, cancel, &|done, total| {
+            report(&Progress {
+                phase: Phase::Worktrees,
+                folders_scanned: out_folders,
+                projects_found: out_projects,
+                current: String::new(),
+                measured: done,
+                to_measure: total,
+            });
+        });
+        out.worktrees = found.repos;
+        out.worktrees_git_missing = found.git_missing;
+    }
     out.cancelled = cancel.is_cancelled();
     out.elapsed = started.elapsed();
     out
