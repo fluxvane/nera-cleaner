@@ -1115,6 +1115,16 @@ mod tests {
         name.replace(' ', "-")
     }
 
+    /// `canonicalize` without Windows' verbatim `\\?\` prefix, which git reads as a
+    /// remote host name ("hostname contains invalid characters").
+    fn plain_canonical(p: &Path) -> PathBuf {
+        let c = fs::canonicalize(p).unwrap();
+        match c.to_string_lossy().strip_prefix(r"\\?\") {
+            Some(rest) => PathBuf::from(rest),
+            None => c,
+        }
+    }
+
     struct Repo {
         base: PathBuf,
         repo: PathBuf,
@@ -1126,8 +1136,7 @@ mod tests {
             git_binary()?;
             static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let base = fs::canonicalize(std::env::temp_dir())
-                .unwrap()
+            let base = plain_canonical(&std::env::temp_dir())
                 .join(format!("nera-wt-{tag}-{}-{n}", std::process::id()));
             let _ = fs::remove_dir_all(&base);
             fs::create_dir_all(&base).unwrap();
@@ -1172,7 +1181,7 @@ mod tests {
                     &wt.to_string_lossy(),
                 ],
             );
-            fs::canonicalize(&wt).unwrap()
+            plain_canonical(&wt)
         }
 
         /// Commit a file in `wt`, then merge its branch into main and push.
