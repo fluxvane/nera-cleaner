@@ -3875,7 +3875,7 @@ dependencies = [
  "io-kit-sys",
  "libc",
  "log",
- "mach2 0.4.3",
+ "mach2 0.6.0",
  "nera-core",
  "nera-ui",
  "plist",
