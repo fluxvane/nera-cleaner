@@ -29,7 +29,7 @@ jobs:
           - name: Windows
             os: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Installs the toolchain pinned in rust-toolchain.toml.
       - name: Install Rust
