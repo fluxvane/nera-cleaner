@@ -52,7 +52,7 @@ sysinfo = "0.37"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 windows-sys = "0.61"
 core-foundation = "0.10"
-io-kit-sys = "0.4"
+io-kit-sys = "0.5"
 mach2 = "0.6"
 
 [profile.dev]
