@@ -46,7 +46,7 @@ Every crate builds and runs on macOS and Windows.
 | Crate | Screen(s) | Where the numbers come from |
 |---|---|---|
 | `nera-cleanup` | Dashboard, System Junk | Allocated sizes per category (APFS private size, hard links counted once); Finder's "available" disk space, read again before and after a cleanup; cloud-drive files stored on disk and Siri / Apple Intelligence data, measured like `du` and never removed |
-| `nera-devscan` | Developer Junk | `node_modules`, build folders, etc. sized like `du`, with "frees at least" when data is shared |
+| `nera-devscan` | Developer Junk | `node_modules`, build folders, etc. sized like `du`, with "frees at least" when data is shared; git worktrees that are merged, missing or abandoned (`engine/worktree.rs`: every check must pass, anything unverified is review-only, removal re-checks and never forces or deletes branches) |
 | `nera-duplicates` | Duplicates | Size → partial hash → full BLAKE3 hash; clones and outside hard links are marked "Shares space" |
 | `nera-space` | Space Lens | Folder sizes like `du -x` (mounted volumes skipped), compressed files sized like Finder |
 | `nera-apps` | Applications | App bundles and leftovers; running state from `proc_pidpath` + `KERN_PROCARGS2` |

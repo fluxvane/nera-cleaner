@@ -2,6 +2,7 @@
 //! regenerable build outputs / dependency folders inside them, and clean the
 //! ones the user ticks. All file work lives in `crate::engine`.
 
+use crate::engine::worktree::{self, Worktree};
 use crate::engine::{self, Phase, Progress, Project, ScanOptions, ScanOutcome};
 use crate::view::{self, Kind};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -28,6 +29,7 @@ enum Busy {
     Idle,
     Scanning,
     Cleaning,
+    RemovingWorktrees,
 }
 
 type Notice = (Tone, SharedString, SharedString);
@@ -37,6 +39,8 @@ pub struct DevScanScreen {
     outcome: Option<ScanOutcome>,
     /// Junk folders ticked for cleaning, by path.
     selected: HashSet<PathBuf>,
+    /// Worktrees ticked for removal, by path.
+    wt_selected: HashSet<PathBuf>,
     /// Project roots whose junk rows are shown.
     expanded: HashSet<PathBuf>,
     busy: Busy,
@@ -56,6 +60,7 @@ impl DevScanScreen {
             roots,
             outcome: None,
             selected: HashSet::new(),
+            wt_selected: HashSet::new(),
             expanded: HashSet::new(),
             busy: Busy::Idle,
             cancelling: false,
@@ -168,6 +173,7 @@ impl DevScanScreen {
         };
         self.outcome = None;
         self.selected.clear();
+        self.wt_selected.clear();
         self.expanded.clear();
         self.notice = None;
         self.busy = Busy::Scanning;
@@ -192,6 +198,13 @@ impl DevScanScreen {
         if outcome.projects.len() <= AUTO_EXPAND_MAX {
             self.expanded = outcome.projects.iter().map(|p| p.root.clone()).collect();
         }
+        self.wt_selected = outcome
+            .worktrees
+            .iter()
+            .flat_map(|r| r.worktrees.iter())
+            .filter(|w| view::worktree_preselected(w))
+            .map(|w| w.path.clone())
+            .collect();
         self.outcome = Some(outcome);
     }
 
@@ -453,6 +466,362 @@ impl DevScanScreen {
         let _ = window.update(cx, |_, window, cx| notify(window, cx, tone, title, message));
     }
 
+    // MARK: Worktrees
+
+    fn all_worktrees(&self) -> Vec<&Worktree> {
+        self.outcome
+            .as_ref()
+            .map(|o| {
+                o.worktrees
+                    .iter()
+                    .flat_map(|r| r.worktrees.iter())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn selected_worktrees(&self) -> Vec<&Worktree> {
+        self.all_worktrees()
+            .into_iter()
+            .filter(|w| self.wt_selected.contains(&w.path))
+            .collect()
+    }
+
+    fn toggle_worktree(&mut self, path: &Path, checked: bool, cx: &mut Context<Self>) {
+        let allowed = self
+            .all_worktrees()
+            .iter()
+            .any(|w| w.path == path && view::worktree_selectable(w));
+        if self.is_busy() || !allowed {
+            return;
+        }
+        if checked {
+            self.wt_selected.insert(path.to_path_buf());
+        } else {
+            self.wt_selected.remove(path);
+        }
+        cx.notify();
+    }
+
+    fn toggle_repo_worktrees(&mut self, repo: &Path, checked: bool, cx: &mut Context<Self>) {
+        if self.is_busy() {
+            return;
+        }
+        let paths: Vec<PathBuf> = self
+            .all_worktrees()
+            .into_iter()
+            .filter(|w| w.repo == repo && view::worktree_selectable(w))
+            .map(|w| w.path.clone())
+            .collect();
+        for p in paths {
+            if checked {
+                self.wt_selected.insert(p);
+            } else {
+                self.wt_selected.remove(&p);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Folders excluded in Settings since the scan are never removed.
+    fn drop_excluded_worktrees(&mut self, cx: &mut Context<Self>) {
+        let excluded = &nera_ui::state::settings(cx).excluded_paths;
+        if excluded.is_empty() {
+            return;
+        }
+        let before = self.wt_selected.len();
+        self.wt_selected.retain(|p| {
+            !nera_core::paths::is_under_any(p, excluded)
+                && !excluded.iter().any(|e| nera_core::paths::is_under(e, p))
+        });
+        if self.wt_selected.len() != before {
+            cx.notify();
+        }
+    }
+
+    fn request_remove_worktrees(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drop_excluded_worktrees(cx);
+        let chosen = self.selected_worktrees();
+        if self.is_busy() || chosen.is_empty() {
+            return;
+        }
+        let n = chosen.len();
+        let size: u64 = chosen.iter().map(|w| w.size).sum();
+        let review = chosen
+            .iter()
+            .filter(|w| w.reason.level() != worktree::Level::Safe)
+            .count();
+        let to_trash = nera_ui::state::settings(cx).move_to_trash;
+        let (title, message) = view::worktree_confirm(n, size, review, to_trash);
+        let action = if to_trash {
+            concat!("Move to ", nera_core::trash_name!())
+        } else {
+            "Delete"
+        };
+        let this = cx.entity().downgrade();
+        let handle = window.window_handle();
+        confirm(
+            Confirm::destructive(title, message, action),
+            // Worktrees always ask: they may hold a branch's only checkout.
+            false,
+            window,
+            cx,
+            move |_window, cx| {
+                let _ = this.update(cx, |this, cx| this.start_remove_worktrees(handle, cx));
+            },
+        );
+    }
+
+    fn start_remove_worktrees(&mut self, window: AnyWindowHandle, cx: &mut Context<Self>) {
+        self.drop_excluded_worktrees(cx);
+        if self.is_busy() {
+            return;
+        }
+        let mut items: Vec<(PathBuf, PathBuf)> = self
+            .selected_worktrees()
+            .into_iter()
+            .map(|w| (w.repo.clone(), w.path.clone()))
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        items.sort();
+        let sizes: Vec<(PathBuf, u64)> = self
+            .selected_worktrees()
+            .into_iter()
+            .map(|w| (w.path.clone(), w.size))
+            .collect();
+        let to_trash = nera_ui::state::settings(cx).move_to_trash;
+        let progress = self.clean_progress.clone();
+        progress.set((0, items.len()));
+        let cancel = Cancel::new();
+        self.cancel = cancel.clone();
+        self.busy = Busy::RemovingWorktrees;
+        self.cancelling = false;
+        self.notice = None;
+        self._task = Some(run_blocking(
+            cx,
+            move || {
+                worktree::remove_many(&items, to_trash, &cancel, &|done, total| {
+                    progress.set((done, total))
+                })
+            },
+            move |this, report, cx| {
+                this.finish_remove_worktrees(report, sizes, to_trash, window, cx)
+            },
+        ));
+        cx.notify();
+    }
+
+    fn finish_remove_worktrees(
+        &mut self,
+        report: worktree::RemoveReport,
+        sizes: Vec<(PathBuf, u64)>,
+        to_trash: bool,
+        window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        self.busy = Busy::Idle;
+        self.cancelling = false;
+        self._task = None;
+
+        let removed: HashSet<&PathBuf> = report.removed.iter().collect();
+        let size: u64 = sizes
+            .iter()
+            .filter(|(p, _)| removed.contains(p))
+            .map(|(_, s)| *s)
+            .sum();
+        if let Some(outcome) = self.outcome.as_mut() {
+            worktree::apply_removed(&mut outcome.worktrees, &report.removed);
+            // Projects that lived inside a removed worktree are gone with it.
+            let inside: Vec<PathBuf> = outcome
+                .projects
+                .iter()
+                .flat_map(|p| p.junk.iter())
+                .filter(|j| {
+                    report
+                        .removed
+                        .iter()
+                        .any(|w| nera_core::paths::is_under(&j.path, w))
+                })
+                .map(|j| j.path.clone())
+                .collect();
+            engine::apply_removed(&mut outcome.projects, &inside);
+        }
+        let alive: HashSet<PathBuf> = self
+            .all_worktrees()
+            .iter()
+            .map(|w| w.path.clone())
+            .collect();
+        self.wt_selected.retain(|p| alive.contains(p));
+        let junk_alive: HashSet<PathBuf> = self
+            .projects()
+            .iter()
+            .flat_map(|p| p.junk.iter().map(|j| j.path.clone()))
+            .collect();
+        self.selected.retain(|p| junk_alive.contains(p));
+        let live_roots: HashSet<PathBuf> = self.projects().iter().map(|p| p.root.clone()).collect();
+        self.expanded.retain(|r| live_roots.contains(r));
+
+        for (path, reason) in &report.failed {
+            log::warn!("worktree not removed: {}: {reason}", path.display());
+        }
+        if report.unpruned > 0 {
+            log::warn!("{} worktree record(s) could not be pruned", report.unpruned);
+        }
+        let n = report.removed.len();
+        let first = report
+            .failed
+            .first()
+            .map(|(p, why)| format!("{}: {why}", engine::display_path(p)))
+            .unwrap_or_default();
+        let (kind, title, message) =
+            view::worktree_result(n, report.failed.len(), size, to_trash, &first);
+        let tone = match kind {
+            Kind::Info => Tone::Info,
+            Kind::Success => Tone::Success,
+            Kind::Warning => Tone::Warning,
+            Kind::Danger => Tone::Danger,
+        };
+        self.notice = Some((tone, title.clone().into(), message.clone().into()));
+        if n > 0 {
+            system_notify(cx, "Git worktrees cleaned", &format!("{title}. {message}"));
+        }
+        let _ = window.update(cx, |_, window, cx| notify(window, cx, tone, title, message));
+    }
+
+    fn render_worktrees(
+        &self,
+        outcome: &ScanOutcome,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if outcome.worktrees.is_empty() {
+            return None;
+        }
+        let busy = self.is_busy();
+        let now = SystemTime::now();
+        let chosen = self.selected_worktrees();
+        let n = chosen.len();
+        let size: u64 = chosen.iter().map(|w| w.size).sum();
+        let muted = cx.theme().muted_foreground;
+        let to_trash = nera_ui::state::settings(cx).move_to_trash;
+
+        let mut list = ListCard::new();
+        for repo in &outcome.worktrees {
+            let key = repo.repo.to_string_lossy().into_owned();
+            let selectable: Vec<&Worktree> = repo
+                .worktrees
+                .iter()
+                .filter(|w| view::worktree_selectable(w))
+                .collect();
+            let n_sel = repo
+                .worktrees
+                .iter()
+                .filter(|w| self.wt_selected.contains(&w.path))
+                .count();
+            let all_on = !selectable.is_empty()
+                && selectable
+                    .iter()
+                    .all(|w| self.wt_selected.contains(&w.path));
+            let repo_path = repo.repo.clone();
+            let mut header = Row::new(
+                SharedString::from(format!("wt-repo:{key}")),
+                repo.name.clone(),
+            )
+            .icon("git-fork")
+            .subtitle(view::worktree_repo_subtitle(
+                &repo.repo,
+                repo.worktrees.len(),
+                n_sel,
+            ))
+            .disabled(busy || selectable.is_empty());
+            if repo.size() > 0 {
+                header = header.value(format::bytes(repo.size()));
+            }
+            header = header.checkbox(
+                all_on,
+                cx.listener(move |this, checked: &bool, _, cx| {
+                    this.toggle_repo_worktrees(&repo_path, *checked, cx)
+                }),
+            );
+            list = list.child(header);
+            for w in &repo.worktrees {
+                let path = w.path.clone();
+                let selectable = view::worktree_selectable(w);
+                let (label, kind) = view::worktree_badge(w.reason);
+                let tone = match kind {
+                    Kind::Success => Tone::Success,
+                    Kind::Info => Tone::Info,
+                    Kind::Warning => Tone::Warning,
+                    Kind::Danger => Tone::Danger,
+                };
+                let name = w
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| engine::display_path(&w.path));
+                let mut row = Row::new(
+                    SharedString::from(format!("wt:{}", w.path.to_string_lossy())),
+                    name,
+                )
+                .icon("git-branch")
+                .subtitle(view::worktree_subtitle(w, now))
+                .badge(Badge::new(label).tone(tone))
+                .selected(self.wt_selected.contains(&w.path))
+                .disabled(busy || !selectable);
+                if let Some(origin) = w.origin {
+                    row = row.badge(Badge::new(origin));
+                }
+                if w.size > 0 {
+                    row = row.value(format::bytes(w.size));
+                }
+                if selectable {
+                    row = row.checkbox(
+                        self.wt_selected.contains(&w.path),
+                        cx.listener(move |this, checked: &bool, _, cx| {
+                            this.toggle_worktree(&path, *checked, cx)
+                        }),
+                    );
+                }
+                list = list.child(div().w_full().pl(sp::XL).child(row));
+            }
+        }
+
+        let hint = if to_trash {
+            concat!(
+                "Moved to the ",
+                nera_core::trash_name!(),
+                ". Branches are never deleted."
+            )
+        } else {
+            "Deleted permanently. Branches are never deleted."
+        };
+        let button = Button::new("remove-worktrees")
+            .primary()
+            .icon(icon("trash"))
+            .label(if n == 0 {
+                "Remove".to_string()
+            } else {
+                format!("Remove {}", view::count(n, "worktree"))
+            })
+            .loading(self.busy == Busy::RemovingWorktrees)
+            .disabled(busy || n == 0)
+            .on_click(cx.listener(|this, _, window, cx| this.request_remove_worktrees(window, cx)));
+        Some(
+            Section::new("Git worktrees")
+                .description("Worktrees whose branch is merged, whose folder is gone, or that nobody has used for months. Anything with unsaved work stays.")
+                .trailing(button)
+                .child(list)
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("{} · {hint}", view::worktree_footer(n, size))),
+                )
+                .into_any_element(),
+        )
+    }
+
     // MARK: Render pieces
 
     fn render_banners(&self) -> Vec<AnyElement> {
@@ -467,6 +836,13 @@ impl DevScanScreen {
         let Some(outcome) = &self.outcome else {
             return out;
         };
+        if outcome.worktrees_git_missing {
+            out.push(
+                Banner::new(Tone::Info, "Git worktrees were not checked")
+                    .message("Some repositories have linked worktrees, but git could not be found. Install git, then scan again.")
+                    .into_any_element(),
+            );
+        }
         if outcome.cancelled {
             out.push(
                 Banner::new(Tone::Info, "Scan stopped early")
@@ -612,6 +988,14 @@ impl DevScanScreen {
                             view::count(p.to_measure, "folder")
                         ),
                     ),
+                    Phase::Worktrees => (
+                        "Checking git worktrees",
+                        format!(
+                            "{} of {}",
+                            view::thousands(p.measured),
+                            view::count(p.to_measure, "repository")
+                        ),
+                    ),
                 };
                 ProgressPanel::new(
                     "scan-progress",
@@ -640,7 +1024,14 @@ impl DevScanScreen {
                 .detail(format!(
                     "{} of {}",
                     view::thousands(done),
-                    view::count(total, "folder")
+                    view::count(
+                        total,
+                        if self.busy == Busy::RemovingWorktrees {
+                            "worktree"
+                        } else {
+                            "folder"
+                        }
+                    )
                 ))
                 .fraction((total > 0).then(|| done as f64 / total as f64))
             }
@@ -667,6 +1058,7 @@ impl DevScanScreen {
                     )
                     .into_any_element(),
             );
+            out.extend(self.render_worktrees(outcome, cx));
             return out;
         }
 
@@ -761,6 +1153,7 @@ impl DevScanScreen {
                 .child(list)
                 .into_any_element(),
         );
+        out.extend(self.render_worktrees(outcome, cx));
         out
     }
 

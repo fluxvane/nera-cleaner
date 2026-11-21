@@ -60,6 +60,27 @@ fn main() {
         out.missing_roots.len(),
         out.elapsed.as_secs_f64()
     );
+    println!(
+        "WORKTREES\trepos={} git_missing={}",
+        out.worktrees.len(),
+        out.worktrees_git_missing
+    );
+    for r in &out.worktrees {
+        println!("WTREPO\t{}\t{}", r.name, r.repo.display());
+        for w in &r.worktrees {
+            println!(
+                "WORKTREE\t{:?}\t{:?}\tselectable={} preselected={}\tbranch={:?}\tbytes={}\t{}\tpath={}",
+                w.reason,
+                w.reason.level(),
+                view::worktree_selectable(w),
+                view::worktree_preselected(w),
+                w.branch,
+                w.size,
+                view::worktree_subtitle(w, now),
+                w.path.display()
+            );
+        }
+    }
     for p in &out.projects {
         println!(
             "PROJECT\t{}\t{}\t{}\t{}\tbadges={:?}\troot={}\tactivity_epoch={}\tbytes={}",
